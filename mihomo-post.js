@@ -63,6 +63,25 @@ if (g.proxies && Array.isArray(g.proxies)) g.proxies = g.proxies.map(p => p === 
 });
 config["proxy-groups"] = config["proxy-groups"].filter(g => g.name !== oldGoogleGroup.name);
 }
+// 5.5 ✨ 彻底剔除前置脚本生成的 Apple/Microsoft/Adobe 分组
+const groupsToRemove = config["proxy-groups"].filter(g =>
+/^(苹果服务|Apple|微软服务|Microsoft|Adobe)/i.test(g.name)
+);
+groupsToRemove.forEach(g => {
+// 清除规则中对该分组的引用
+config.rules = config.rules.map(r => {
+const p = r.split(',');
+if (p.length >= 3 && p[2].trim() === g.name) { p[2] = "DIRECT"; return p.join(','); }
+return r;
+});
+// 清除其他分组中对该分组的引用
+config["proxy-groups"].forEach(other => {
+if (other.proxies && Array.isArray(other.proxies)) {
+other.proxies = other.proxies.map(p => p === g.name ? "DIRECT" : p);
+}
+});
+});
+config["proxy-groups"] = config["proxy-groups"].filter(g => !groupsToRemove.some(r => r.name === g.name));
 // 6. 专属定制规则并置顶
 const customRules = [
 // ======== 常见内网/局域网 IP 直连防劫持 ========
