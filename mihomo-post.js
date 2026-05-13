@@ -25,10 +25,10 @@ group.tolerance = 150;
 // 4. 构建定制分组
 const safeProxies = names => names.filter(name => allowedNames.has(name)).length > 0 ? names.filter(name => allowedNames.has(name)) : ["DIRECT"];
 const targetCustomGoogleGroup = "🤖 谷歌 & Gemini";
-// 提取节点池，并剔除 Gemini 不支持的地区 (如香港、中国大陆等)
+// 提取节点池，并剔除 Gemini 不支持的地区 (如香港、新加坡、中国大陆等)
 const geminiAllowedNodes = config.proxies ? config.proxies
 .map(p => p.name)
-.filter(name => !/(港|HK|Hong Kong|中国|回国|CN|China)/i.test(name)) : [];
+.filter(name => !/(港|HK|Hong Kong|新加坡|SG|Singapore|中国|回国|CN|China)/i.test(name)) : [];
 config["proxy-groups"].unshift(
 {
 name: targetCustomGoogleGroup,
