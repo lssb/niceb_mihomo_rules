@@ -1,0 +1,107 @@
+// 全局后置脚本：净化节点、定制分流、轮询发牌机防封版、抢票特化、Gemini专属智选及静态资源修复
+function main(config) {
+if (!config.rules) config.rules = [];
+if (!config["proxy-groups"]) config["proxy-groups"] = [];
+// 1. 彻底锁死 IPv6
+config.ipv6 = true;
+// 2. 净化节点 (去流量面板)
+if (config.proxies && Array.isArray(config.proxies)) {
+config.proxies = config.proxies.filter(proxy => {
+const name = proxy.name;
+if (/(剩余|流量)/i.test(name) && !/倍率/i.test(name)) return false;
+if (/到期|过期|Expire|官网|套餐|联系|群/i.test(name)) return false;
+if (/直连|direct/i.test(name)) return false;
+return true;
+});
+}
+// 3. 安全清理 & 降敏
+const validProxyNames = new Set(config.proxies ? config.proxies.map(p => p.name) : []);
+const validGroupNames = new Set(config["proxy-groups"].map(g => g.name));
+const allowedNames = new Set([...validProxyNames, ...validGroupNames, "DIRECT", "REJECT", "PASS", "🎯 全球直连", "选择代理", "手动选择"]);
+config["proxy-groups"].forEach(group => {
+if (group.proxies && Array.isArray(group.proxies)) {
+group.proxies = group.proxies.filter(name => allowedNames.has(name));
+if (group.proxies.length === 0) group.proxies = ["DIRECT"];
+}
+// 全局默认 url-test 间隔
+if (group.type === "url-test") {
+group.interval = 14400;
+group.tolerance = 150;
+}
+});
+// 4. 构建定制分组
+const safeProxies = names => names.filter(name => allowedNames.has(name)).length > 0 ? names.filter(name => allowedNames.has(name)) : ["DIRECT"];
+const targetCustomGoogleGroup = "🤖 谷歌 & Gemini";
+// 提取节点池，并剔除 Gemini 不支持的地区 (如香港、中国大陆等)
+const geminiAllowedNodes = config.proxies ? config.proxies
+.map(p => p.name)
+.filter(name => !/(港|HK|Hong Kong|中国|回国|CN|China)/i.test(name)) : [];
+config["proxy-groups"].unshift(
+{
+name: targetCustomGoogleGroup,
+type: "url-test",
+url: "https://gemini.google.com/",
+interval: 1800, // ✨ 设为半小时(1800秒)，兼顾测速精度与防频繁探测
+tolerance: 150,
+proxies: safeProxies(geminiAllowedNodes.length > 0 ? geminiAllowedNodes : ["DIRECT"])
+},
+{ name: "🏎️ F1 TV", type: "select", proxies: safeProxies(["低倍率节点", "美国节点", "选择代理", "DIRECT"]) },
+{ name: "🎲 随机漫游", type: "load-balance", url: "http://www.gstatic.com/generate_204", interval: 14400, strategy: "round-robin", proxies: safeProxies(config.proxies ? config.proxies.map(p => p.name) : []) }
+);
+allowedNames.add("🎲 随机漫游");
+// 注入主通道
+config["proxy-groups"].forEach(group => {
+if (/^(🚀 节点选择|PROXIES|Proxy|手动选择|节点选择)$/i.test(group.name) && group.type === "select") {
+if (group.proxies && Array.isArray(group.proxies) && !group.proxies.includes("🎲 随机漫游")) {
+group.proxies.splice(1, 0, "🎲 随机漫游");
+}
+}
+});
+// 5. 谷歌规则接管
+const oldGoogleGroup = config["proxy-groups"].find(g => /google|谷歌/i.test(g.name) && g.name !== targetCustomGoogleGroup);
+if (oldGoogleGroup) {
+config.rules = config.rules.map(r => {
+const p = r.split(',');
+if (p.length >= 3 && p[2].trim() === oldGoogleGroup.name) { p[2] = targetCustomGoogleGroup; return p.join(','); }
+return r;
+});
+config["proxy-groups"].forEach(g => {
+if (g.proxies && Array.isArray(g.proxies)) g.proxies = g.proxies.map(p => p === oldGoogleGroup.name ? targetCustomGoogleGroup : p);
+});
+config["proxy-groups"] = config["proxy-groups"].filter(g => g.name !== oldGoogleGroup.name);
+}
+// 6. 专属定制规则并置顶
+const customRules = [
+// ======== 常见内网/局域网 IP 直连防劫持 ========
+"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve", // 本机回环
+"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve", // A类私有地址
+"IP-CIDR,172.16.0.0/12,DIRECT,no-resolve", // B类私有地址
+"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve", // C类私有地址
+"IP-CIDR,169.254.0.0/16,DIRECT,no-resolve", // 链路本地地址
+"IP-CIDR,224.0.0.0/4,DIRECT,no-resolve", // 组播地址
+// ====================================================
+// Tailscale / CGNAT 直连
+"IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
+"DOMAIN-SUFFIX,ts.net,DIRECT",
+"DOMAIN-SUFFIX,tailscale.com,DIRECT",
+"DOMAIN-SUFFIX,tailscale.io,DIRECT",
+"PROCESS-NAME,tailscaled,DIRECT",
+"PROCESS-NAME,Tailscale,DIRECT",
+// F1 TV 分流
+"DOMAIN-SUFFIX,f1tv.formula1.com,🏎️ F1 TV",
+"DOMAIN-SUFFIX,formula1.com,🏎️ F1 TV",
+"DOMAIN-KEYWORD,f1tv,🏎️ F1 TV",
+"DOMAIN-KEYWORD,formula1,🏎️ F1 TV",
+// ======== ✨ Gemini & Google 核心/静态资源防分裂 ========
+"DOMAIN-SUFFIX,gemini.google.com," + targetCustomGoogleGroup,
+"DOMAIN-SUFFIX,bard.google.com," + targetCustomGoogleGroup,
+"DOMAIN-SUFFIX,generativeai.google," + targetCustomGoogleGroup,
+"DOMAIN-SUFFIX,aistudio.google.com," + targetCustomGoogleGroup,
+"DOMAIN-KEYWORD,gemini," + targetCustomGoogleGroup,
+"DOMAIN-SUFFIX,googleusercontent.com," + targetCustomGoogleGroup, // 包含 lh3 头像及媒体托管
+"DOMAIN-SUFFIX,gstatic.com," + targetCustomGoogleGroup, // Google 基础静态资源
+"DOMAIN-SUFFIX,googleapis.com," + targetCustomGoogleGroup // Google 核心 API 调用
+];
+config.rules = [...customRules, ...config.rules];
+return config;
+}
