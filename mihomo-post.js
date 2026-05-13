@@ -65,8 +65,7 @@ config["proxy-groups"] = config["proxy-groups"].filter(g => g.name !== oldGoogle
 }
 // 5.5 ✨ 彻底剔除前置脚本生成的 Apple/Microsoft/Adobe 相关分组
 const groupsToRemove = config["proxy-groups"].filter(g =>
-/^(苹果服务|Apple|微软服务|Microsoft|Adobe|谷歌服务|Google)/i.test(g.name)
-&& g.name !== targetCustomGoogleGroup  // 排除我们自己的 Gemini 组
+/^(苹果服务|Apple|微软服务|Microsoft|Adobe)/i.test(g.name)
 );
 groupsToRemove.forEach(g => {
 // 清除规则中对该分组的引用
