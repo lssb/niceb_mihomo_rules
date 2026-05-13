@@ -1,19 +1,12 @@
-// 全局后置脚本：净化节点、定制分流、轮询发牌机防封版、抢票特化、Gemini专属智选及静态资源修复
+// 全局后置脚本：去 Apple/Microsoft/Adobe 规则、保留流量面板、定制分流、轮询发牌机防封版、抢票特化、Gemini专属智选及静态资源修复
 function main(config) {
 if (!config.rules) config.rules = [];
 if (!config["proxy-groups"]) config["proxy-groups"] = [];
 // 1. 彻底锁死 IPv6
 config.ipv6 = true;
-// 2. 净化节点 (去流量面板)
-if (config.proxies && Array.isArray(config.proxies)) {
-config.proxies = config.proxies.filter(proxy => {
-const name = proxy.name;
-if (/(剩余|流量)/i.test(name) && !/倍率/i.test(name)) return false;
-if (/到期|过期|Expire|官网|套餐|联系|群/i.test(name)) return false;
-if (/直连|direct/i.test(name)) return false;
-return true;
-});
-}
+// 2. ✨ 新增：暴力剔除机场自带的 Apple, Microsoft, Adobe 相关规则
+config.rules = config.rules.filter(rule => !/(apple|microsoft|adobe)/i.test(rule));
+// 注意：已删除原有的"净化节点 (去流量面板)"模块，现在流量面板节点会全部保留
 // 3. 安全清理 & 降敏
 const validProxyNames = new Set(config.proxies ? config.proxies.map(p => p.name) : []);
 const validGroupNames = new Set(config["proxy-groups"].map(g => g.name));
