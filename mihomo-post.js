@@ -25,10 +25,10 @@ group.tolerance = 150;
 // 4. 构建定制分组
 const safeProxies = names => names.filter(name => allowedNames.has(name)).length > 0 ? names.filter(name => allowedNames.has(name)) : ["DIRECT"];
 const targetCustomGoogleGroup = "🤖 谷歌 & Gemini";
-// 提取节点池，并剔除 Gemini 不支持的地区 (如香港、新加坡、中国大陆等)
+// 提取节点池，并剔除 Gemini 不支持的地区 (如香港、新加坡、中国大陆等) 以及流媒体节点
 const geminiAllowedNodes = config.proxies ? config.proxies
 .map(p => p.name)
-.filter(name => !/(港|HK|Hong Kong|新加坡|SG|Singapore|中国|回国|CN|China)/i.test(name)) : [];
+.filter(name => !/(港|HK|Hong Kong|新加坡|SG|Singapore|中国|回国|CN|China|流媒体)/i.test(name)) : [];
 config["proxy-groups"].unshift(
 {
 name: targetCustomGoogleGroup,
@@ -82,7 +82,15 @@ other.proxies = other.proxies.map(p => p === g.name ? "DIRECT" : p);
 });
 });
 config["proxy-groups"] = config["proxy-groups"].filter(g => !groupsToRemove.some(r => r.name === g.name));
-// 6. 专属定制规则并置顶
+// 6. ✨ 重建 AI服务 分组：剔除流媒体节点（前置脚本该分组用全量节点池，需要过滤）
+const aiServiceGroup = config["proxy-groups"].find(g => g.name === "AI服务");
+if (aiServiceGroup && aiServiceGroup.proxies && Array.isArray(aiServiceGroup.proxies)) {
+    const noStreamProxies = aiServiceGroup.proxies.filter(name =>
+        allowedNames.has(name) && !/流媒体/i.test(name)
+    );
+    aiServiceGroup.proxies = noStreamProxies.length > 0 ? noStreamProxies : ["DIRECT"];
+}
+// 7. 专属定制规则并置顶
 const customRules = [
 // ======== 常见内网/局域网 IP 直连防劫持 ========
 "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve", // 本机回环
