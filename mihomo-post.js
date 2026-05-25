@@ -102,6 +102,8 @@ const customRules = [
 // EasyTier 虚拟组网（10.0.0.0/8 已覆盖虚拟网段，下面为显式标注 + VPS 公网锚点）
 "IP-CIDR,10.144.144.0/24,DIRECT,no-resolve",
 "IP-CIDR,8.134.112.127/32,DIRECT,no-resolve",
+// ZeroTier  overlay（与 EasyTier 局域网 peer 配合）
+"IP-CIDR,192.168.193.0/24,DIRECT,no-resolve",
 "PROCESS-NAME,easytier-core,DIRECT",
 "PROCESS-NAME,easytier-cli,DIRECT",
 // ====================================================
@@ -135,7 +137,7 @@ if (config.tun) {
 const exKey = config.tun["route-exclude-address"] ? "route-exclude-address" : (config.tun.routeExcludeAddress ? "routeExcludeAddress" : null);
 if (exKey) {
 if (!Array.isArray(config.tun[exKey])) config.tun[exKey] = [];
-["10.144.144.0/24", "8.134.112.127/32"].forEach(cidr => {
+["10.144.144.0/24", "8.134.112.127/32", "192.168.193.0/24"].forEach(cidr => {
 if (!config.tun[exKey].includes(cidr)) config.tun[exKey].push(cidr);
 });
 }
