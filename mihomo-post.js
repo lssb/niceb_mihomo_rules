@@ -99,6 +99,11 @@ const customRules = [
 "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve", // C类私有地址
 "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve", // 链路本地地址
 "IP-CIDR,224.0.0.0/4,DIRECT,no-resolve", // 组播地址
+// EasyTier 虚拟组网（10.0.0.0/8 已覆盖虚拟网段，下面为显式标注 + VPS 公网锚点）
+"IP-CIDR,10.144.144.0/24,DIRECT,no-resolve",
+"IP-CIDR,8.134.112.127/32,DIRECT,no-resolve",
+"PROCESS-NAME,easytier-core,DIRECT",
+"PROCESS-NAME,easytier-cli,DIRECT",
 // ====================================================
 // Tailscale / CGNAT 直连
 "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
@@ -125,5 +130,15 @@ const customRules = [
 "DOMAIN-SUFFIX,googleapis.com," + targetCustomGoogleGroup // Google 核心 API 调用
 ];
 config.rules = [...customRules, ...config.rules];
+// TUN 旁路：避免 mihomo 抢 EasyTier / VPS 锚点流量（与 Clash Verge route-exclude-address 对应）
+if (config.tun) {
+const exKey = config.tun["route-exclude-address"] ? "route-exclude-address" : (config.tun.routeExcludeAddress ? "routeExcludeAddress" : null);
+if (exKey) {
+if (!Array.isArray(config.tun[exKey])) config.tun[exKey] = [];
+["10.144.144.0/24", "8.134.112.127/32"].forEach(cidr => {
+if (!config.tun[exKey].includes(cidr)) config.tun[exKey].push(cidr);
+});
+}
+}
 return config;
 }
