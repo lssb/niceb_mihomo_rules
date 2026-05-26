@@ -114,6 +114,8 @@ const customRules = [
 "DOMAIN-SUFFIX,tailscale.io,DIRECT",
 "PROCESS-NAME,tailscaled,DIRECT",
 "PROCESS-NAME,Tailscale,DIRECT",
+// .local 域名直连（局域网设备 discovery、服务注册）
+"DOMAIN-SUFFIX,.local,DIRECT",
 // 校园网/南方医科大学直连
 "DOMAIN-SUFFIX,smu.edu.cn,DIRECT",
 // F1 TV 分流
