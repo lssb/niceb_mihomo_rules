@@ -134,15 +134,29 @@ const customRules = [
 "DOMAIN-SUFFIX,googleapis.com," + targetCustomGoogleGroup // Google 核心 API 调用
 ];
 config.rules = [...customRules, ...config.rules];
-// TUN 旁路：避免 mihomo 抢 EasyTier / VPS 锚点流量（与 Clash Verge route-exclude-address 对应）
+// TUN 旁路：局域网 + EasyTier / VPS / ZeroTier，避免 TUN 劫持导致局域网代理 SYN_RCVD
 if (config.tun) {
-const exKey = config.tun["route-exclude-address"] ? "route-exclude-address" : (config.tun.routeExcludeAddress ? "routeExcludeAddress" : null);
-if (exKey) {
+const exKey = config.tun["route-exclude-address"] ? "route-exclude-address" : (config.tun.routeExcludeAddress ? "routeExcludeAddress" : "route-exclude-address");
 if (!Array.isArray(config.tun[exKey])) config.tun[exKey] = [];
-["10.144.144.0/24", "8.134.112.127/32", "192.168.193.0/24"].forEach(cidr => {
+[
+"192.168.0.0/16",
+"10.0.0.0/8",
+"172.16.0.0/12",
+"127.0.0.0/8",
+"10.144.144.0/24",
+"8.134.112.127/32",
+"192.168.193.0/24"
+].forEach(cidr => {
 if (!config.tun[exKey].includes(cidr)) config.tun[exKey].push(cidr);
 });
 }
+// DNS fake-ip：私有网段不走 fake-ip，避免 NAS 等局域网 IP 被映射进 TUN
+if (config.dns) {
+const filterKey = config.dns["fake-ip-filter"] ? "fake-ip-filter" : (config.dns.fakeIpFilter ? "fakeIpFilter" : "fake-ip-filter");
+if (!Array.isArray(config.dns[filterKey])) config.dns[filterKey] = [];
+["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"].forEach(cidr => {
+if (!config.dns[filterKey].includes(cidr)) config.dns[filterKey].push(cidr);
+});
 }
 return config;
 }
