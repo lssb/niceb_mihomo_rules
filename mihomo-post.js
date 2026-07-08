@@ -2,8 +2,12 @@
 function main(config) {
 if (!config.rules) config.rules = [];
 if (!config["proxy-groups"]) config["proxy-groups"] = [];
-// 1. 彻底锁死 IPv6
+// 1. 连接优化：关闭统一延迟测速、开启 TCP 并行，保留 IPv6
 config.ipv6 = true;
+config["unified-delay"] = false;
+config["tcp-concurrent"] = true;
+if (!config.dns) config.dns = {};
+config.dns.ipv6 = true;
 // 2. ✨ 新增：暴力剔除机场自带的 Apple, Microsoft, Adobe 相关规则
 config.rules = config.rules.filter(rule => !/(apple|microsoft|adobe)/i.test(rule));
 // 注意：已删除原有的"净化节点 (去流量面板)"模块，现在流量面板节点会全部保留
