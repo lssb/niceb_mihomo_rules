@@ -1,4 +1,4 @@
-// 全局后置脚本：去 Apple/Microsoft/Adobe 规则、保留流量面板、定制分流、轮询发牌机防封版、抢票特化、Gemini专属智选及静态资源修复
+// 全局后置脚本：去 Apple/Microsoft/Adobe 规则、保留流量面板、定制分流、抢票特化、Gemini 地区组智选及静态资源修复
 function main(config) {
 if (!config.rules) config.rules = [];
 if (!config["proxy-groups"]) config["proxy-groups"] = [];
@@ -29,31 +29,32 @@ group.tolerance = 150;
 // 4. 构建定制分组
 const safeProxies = names => names.filter(name => allowedNames.has(name)).length > 0 ? names.filter(name => allowedNames.has(name)) : ["DIRECT"];
 const targetCustomGoogleGroup = "🤖 谷歌 & Gemini";
-// 提取节点池，并剔除 Gemini 不支持的地区 (如香港、新加坡、中国大陆等) 以及流媒体节点
-const geminiAllowedNodes = config.proxies ? config.proxies
-.map(p => p.name)
-.filter(name => !/(港|HK|Hong Kong|新加坡|SG|Singapore|中国|回国|CN|China|流媒体)/i.test(name)) : [];
+// Gemini 只引用地区 url-test 组（排除港/新），每周期约 4 次 gemini.google.com 测速
+const geminiRegionPreferred = ["🇺🇸 美国节点", "🇺🇲 美国节点", "🇯🇵 日本节点", "🇨🇳 台湾节点", "🇰🇷 韩国节点", "美国节点", "日本节点", "台湾节点", "韩国节点"];
+const geminiRegionGroups = geminiRegionPreferred.filter(name => validGroupNames.has(name));
+if (geminiRegionGroups.length === 0) {
+geminiRegionGroups.push(...config["proxy-groups"]
+.filter(g => g.type === "url-test")
+.filter(g => /(美|States|\bUS\b|日|Japan|\bJP\b|台|Tai|\bTW\b|韩|Korea|\bKR\b)/i.test(g.name))
+.filter(g => !/(港|HK|Hong|新加坡|SG|Singapore|流媒体|奈飞|Netflix|自动选择|低倍率|Gemini|谷歌|Google|OpenAi|openai)/i.test(g.name))
+.map(g => g.name));
+}
 config["proxy-groups"].unshift(
 {
 name: targetCustomGoogleGroup,
 type: "url-test",
 url: "https://gemini.google.com/",
-interval: 1800, // ✨ 设为半小时(1800秒)，兼顾测速精度与防频繁探测
+interval: 3600,
 tolerance: 150,
-proxies: safeProxies(geminiAllowedNodes.length > 0 ? geminiAllowedNodes : ["DIRECT"])
+proxies: safeProxies(geminiRegionGroups.length > 0 ? geminiRegionGroups : ["DIRECT"])
 },
-{ name: "🏎️ F1 TV", type: "select", proxies: safeProxies(["低倍率节点", "美国节点", "选择代理", "DIRECT"]) },
-{ name: "🎲 随机漫游", type: "load-balance", url: "http://www.gstatic.com/generate_204", interval: 14400, strategy: "round-robin", proxies: safeProxies(config.proxies ? config.proxies.map(p => p.name) : []) }
+{ name: "🏎️ F1 TV", type: "select", proxies: safeProxies(["低倍率节点", "美国节点", "选择代理", "DIRECT"]) }
 );
-allowedNames.add("🎲 随机漫游");
-// 注入主通道
-config["proxy-groups"].forEach(group => {
-if (/^(🚀 节点选择|PROXIES|Proxy|手动选择|节点选择)$/i.test(group.name) && group.type === "select") {
-if (group.proxies && Array.isArray(group.proxies) && !group.proxies.includes("🎲 随机漫游")) {
-group.proxies.splice(1, 0, "🎲 随机漫游");
-}
-}
+// 剔除已停用的 🎲 随机漫游 分组及其引用
+config["proxy-groups"].forEach(g => {
+if (g.proxies && Array.isArray(g.proxies)) g.proxies = g.proxies.filter(p => p !== "🎲 随机漫游");
 });
+config["proxy-groups"] = config["proxy-groups"].filter(g => g.name !== "🎲 随机漫游");
 // 5. 谷歌规则接管
 const oldGoogleGroup = config["proxy-groups"].find(g => /google|谷歌/i.test(g.name) && g.name !== targetCustomGoogleGroup);
 if (oldGoogleGroup) {
