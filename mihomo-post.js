@@ -1,4 +1,4 @@
-// 全局后置脚本：去 Apple/Microsoft/Adobe 规则、保留流量面板、定制分流、抢票特化、Gemini 地区组智选及静态资源修复
+// 全局后置脚本：去 Apple/Microsoft/Adobe 规则、保留流量面板、定制分流、抢票特化、Gemini 地区组智选及静态资源修复、地区组剔除高速/流媒体/住宅IP、家庭IP与媒体独立成组
 function main(config) {
 if (!config.rules) config.rules = [];
 if (!config["proxy-groups"]) config["proxy-groups"] = [];
@@ -95,6 +95,99 @@ if (aiServiceGroup && aiServiceGroup.proxies && Array.isArray(aiServiceGroup.pro
     );
     aiServiceGroup.proxies = noStreamProxies.length > 0 ? noStreamProxies : ["DIRECT"];
 }
+// 6.5 地区组剔除住宅IP/流媒体，独立家庭IP + 媒体（低倍率首选，流媒体专线备选）
+const regionGroupRe = /(香港|台湾|新加坡|日本|韩国|美国|英国|德国|马来西亚)节点$/;
+const homeIpRe = /住宅IP|家庭IP|Home\s?IP/i;
+const mediaNodeRe = /流媒体|高速媒体|高速/i;
+const stripFromRegionRe = /住宅IP|家庭IP|Home\s?IP|流媒体|高速媒体|高速/i;
+const oldAppGroupRe = /^(Youtube|YouTube|Twitch|Spotify|TikTok|Netflix|哔哩哔哩|巴哈姆特)$/i;
+const policyRewrite = {
+    Youtube: "媒体",
+    YouTube: "媒体",
+    Twitch: "媒体",
+    Spotify: "媒体",
+    TikTok: "媒体",
+    Netflix: "媒体",
+    "哔哩哔哩": "DIRECT",
+    "巴哈姆特": "台湾节点"
+};
+const mapPolicyName = name => {
+    if (policyRewrite[name]) return policyRewrite[name];
+    const hit = Object.keys(policyRewrite).find(k => k.toLowerCase() === String(name).toLowerCase());
+    return hit ? policyRewrite[hit] : name;
+};
+const allProxyNames = config.proxies ? config.proxies.map(p => p.name) : [];
+const homeIpNodes = allProxyNames.filter(name => homeIpRe.test(name));
+const mediaNodes = allProxyNames.filter(name => mediaNodeRe.test(name));
+config["proxy-groups"].forEach(group => {
+    if (!regionGroupRe.test(group.name) || !Array.isArray(group.proxies)) return;
+    group.proxies = group.proxies.filter(name => !stripFromRegionRe.test(name));
+    if (group.proxies.length === 0) group.proxies = ["DIRECT"];
+});
+["家庭IP", "流媒体专线", "媒体"].forEach(n => allowedNames.add(n));
+config["proxy-groups"] = config["proxy-groups"].filter(g => !["家庭IP", "流媒体专线", "媒体"].includes(g.name));
+config["proxy-groups"].unshift(
+    {
+        name: "家庭IP",
+        type: "url-test",
+        url: "https://cp.cloudflare.com",
+        interval: 14400,
+        tolerance: 150,
+        proxies: safeProxies(homeIpNodes)
+    },
+    {
+        name: "流媒体专线",
+        type: "url-test",
+        url: "https://cp.cloudflare.com",
+        interval: 14400,
+        tolerance: 150,
+        proxies: safeProxies(mediaNodes)
+    },
+    {
+        name: "媒体",
+        type: "select",
+        proxies: safeProxies(["低倍率节点", "流媒体专线"])
+    }
+);
+const selectProxyGroup = config["proxy-groups"].find(g => g.name === "选择代理");
+if (selectProxyGroup && Array.isArray(selectProxyGroup.proxies)) {
+    const insertNames = ["媒体", "家庭IP"].filter(n => !selectProxyGroup.proxies.includes(n));
+    if (insertNames.length > 0) {
+        const lowIdx = selectProxyGroup.proxies.indexOf("低倍率节点");
+        if (lowIdx >= 0) selectProxyGroup.proxies.splice(lowIdx + 1, 0, ...insertNames);
+        else {
+            const manualIdx = selectProxyGroup.proxies.indexOf("手动选择");
+            if (manualIdx >= 0) selectProxyGroup.proxies.splice(manualIdx, 0, ...insertNames);
+            else selectProxyGroup.proxies.push(...insertNames);
+        }
+    }
+}
+const ruleParamsSet = new Set(["no-resolve", "force-remote-dns", "prefer-ipv6"]);
+config.rules = config.rules.map(rule => {
+    if (typeof rule !== "string") return rule;
+    const parts = rule.split(",");
+    if (parts.length < 2) return rule;
+    const type = parts[0].trim();
+    const targetIndex = type === "MATCH" ? 1 : 2;
+    if (targetIndex >= parts.length) return rule;
+    const raw = parts[targetIndex].trim();
+    if (ruleParamsSet.has(raw)) return rule;
+    const next = mapPolicyName(raw);
+    if (next === raw) return rule;
+    parts[targetIndex] = next;
+    return parts.join(",");
+});
+config["proxy-groups"].forEach(group => {
+    if (!group.proxies || !Array.isArray(group.proxies)) return;
+    const seen = new Set();
+    group.proxies = group.proxies.map(p => mapPolicyName(p)).filter(p => {
+        if (seen.has(p)) return false;
+        seen.add(p);
+        return true;
+    });
+    if (group.proxies.length === 0) group.proxies = ["DIRECT"];
+});
+config["proxy-groups"] = config["proxy-groups"].filter(g => !oldAppGroupRe.test(g.name));
 // 7. 专属定制规则并置顶
 const customRules = [
 // ======== 常见内网/局域网 IP 直连防劫持 ========
@@ -123,6 +216,9 @@ const customRules = [
 "DOMAIN-SUFFIX,.local,DIRECT",
 // 校园网/南方医科大学直连
 "DOMAIN-SUFFIX,smu.edu.cn,DIRECT",
+// 哔哩直连、巴哈走台湾节点
+"GEOSITE,bilibili,DIRECT",
+"GEOSITE,bahamut,台湾节点",
 // F1 TV 分流
 "DOMAIN-SUFFIX,f1tv.formula1.com,🏎️ F1 TV",
 "DOMAIN-SUFFIX,formula1.com,🏎️ F1 TV",
