@@ -18,7 +18,7 @@ const allowedNames = new Set([...validProxyNames, ...validGroupNames, "DIRECT", 
 config["proxy-groups"].forEach(group => {
 if (group.proxies && Array.isArray(group.proxies)) {
 group.proxies = group.proxies.filter(name => allowedNames.has(name));
-if (group.proxies.length === 0) group.proxies = ["DIRECT"];
+if (group.proxies.length === 0 && group.name !== "AI服务") group.proxies = ["DIRECT"];
 }
 // 全局默认 url-test 间隔
 if (group.type === "url-test") {
@@ -87,14 +87,26 @@ other.proxies = other.proxies.map(p => p === g.name ? "DIRECT" : p);
 });
 });
 config["proxy-groups"] = config["proxy-groups"].filter(g => !groupsToRemove.some(r => r.name === g.name));
-// 6. ✨ 重建 AI服务 分组：剔除流媒体节点（前置脚本该分组用全量节点池，需要过滤）
+// 6. ✨ 重建 AI服务 分组：剔除流媒体、选择代理、DIRECT（前置脚本该分组用全量节点池）
+const aiServiceExcludedMembers = new Set(["DIRECT", "选择代理", "REJECT", "PASS"]);
+const sanitizeAiServiceGroup = () => {
 const aiServiceGroup = config["proxy-groups"].find(g => g.name === "AI服务");
-if (aiServiceGroup && aiServiceGroup.proxies && Array.isArray(aiServiceGroup.proxies)) {
-    const noStreamProxies = aiServiceGroup.proxies.filter(name =>
-        allowedNames.has(name) && !/流媒体/i.test(name)
-    );
-    aiServiceGroup.proxies = noStreamProxies.length > 0 ? noStreamProxies : ["DIRECT"];
+if (!aiServiceGroup || !Array.isArray(aiServiceGroup.proxies)) return;
+let proxies = aiServiceGroup.proxies.filter(name =>
+allowedNames.has(name) && !/流媒体/i.test(name) && !aiServiceExcludedMembers.has(name)
+);
+if (proxies.length === 0) {
+const groupNamesNow = new Set(config["proxy-groups"].map(g => g && g.name).filter(Boolean));
+const regionFallback = geminiRegionPreferred.filter(name => groupNamesNow.has(name));
+if (regionFallback.length) proxies = regionFallback;
+else {
+const first = config.proxies ? config.proxies.map(p => p.name).find(n => !/流媒体/i.test(n)) : undefined;
+if (first) proxies = [first];
 }
+}
+if (proxies.length) aiServiceGroup.proxies = proxies;
+};
+sanitizeAiServiceGroup();
 // 6.5 地区组剔除住宅IP/流媒体，独立家庭IP + 媒体（低倍率首选，流媒体专线备选）
 const regionGroupRe = /(香港|台湾|新加坡|日本|韩国|美国|英国|德国|马来西亚)节点$/;
 const homeIpRe = /住宅IP|家庭IP|Home\s?IP/i;
@@ -185,9 +197,10 @@ config["proxy-groups"].forEach(group => {
         seen.add(p);
         return true;
     });
-    if (group.proxies.length === 0) group.proxies = ["DIRECT"];
+    if (group.proxies.length === 0 && group.name !== "AI服务") group.proxies = ["DIRECT"];
 });
 config["proxy-groups"] = config["proxy-groups"].filter(g => !oldAppGroupRe.test(g.name));
+sanitizeAiServiceGroup();
 // 7. 专属定制规则并置顶
 const customRules = [
 // ======== 常见内网/局域网 IP 直连防劫持 ========
