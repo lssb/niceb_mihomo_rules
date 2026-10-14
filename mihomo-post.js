@@ -1,4 +1,4 @@
-// 全局后置脚本：去 Apple/Microsoft/Adobe 规则、保留流量面板、定制分流、抢票特化、Gemini 地区组智选及静态资源修复、地区组剔除高速/流媒体/住宅IP、家庭IP与媒体独立成组
+// 全局后置脚本：去 Apple/Microsoft/Adobe 规则、保留流量面板、定制分流、抢票特化、Gemini 地区组智选及静态资源修复、地区组剔住宅/真流媒体、家庭IP与媒体独立成组
 function main(config) {
 if (!config.rules) config.rules = [];
 if (!config["proxy-groups"]) config["proxy-groups"] = [];
@@ -107,11 +107,13 @@ if (first) proxies = [first];
 if (proxies.length) aiServiceGroup.proxies = proxies;
 };
 sanitizeAiServiceGroup();
-// 6.5 地区组剔除住宅IP/流媒体，独立家庭IP + 媒体（低倍率首选，流媒体专线备选）
+// 6.5 地区组剔除住宅IP/真·流媒体节点；BGP|CTCU|CMCC 等「高速」专线留在国家组
 const regionGroupRe = /(香港|台湾|新加坡|日本|韩国|美国|英国|德国|马来西亚)节点$/;
 const homeIpRe = /住宅IP|家庭IP|Home\s?IP/i;
-const mediaNodeRe = /流媒体|高速媒体|高速/i;
-const stripFromRegionRe = /住宅IP|家庭IP|Home\s?IP|流媒体|高速媒体|高速/i;
+// 仅名称带流媒体解锁语义的进「流媒体专线」，不因「高速」误判（如 日本高速|BGP|CTCU）
+const streamingOnlyRe = /流媒体|高速媒体|奈飞|Netflix|\bNF\b/i;
+const stripFromRegionRe = /住宅IP|家庭IP|Home\s?IP|流媒体|高速媒体|奈飞|Netflix|\bNF\b/i;
+const mediaNodeRe = streamingOnlyRe;
 const oldAppGroupRe = /^(Youtube|YouTube|Twitch|Spotify|TikTok|Netflix|哔哩哔哩|巴哈姆特)$/i;
 const policyRewrite = {
     Youtube: "媒体",
