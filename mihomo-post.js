@@ -1,4 +1,4 @@
-// 全局后置脚本：去 Apple/Microsoft/Adobe 规则、保留流量面板、定制分流、抢票特化、Gemini 地区组智选及静态资源修复、地区组剔住宅/真流媒体、家庭IP与媒体独立成组
+// 全局后置脚本：去 Apple/Microsoft/Adobe 规则、保留流量面板、定制分流、抢票特化、Gemini 地区组智选及静态资源修复、家庭IP与媒体(url-test 低倍率∪流媒体)
 function main(config) {
 if (!config.rules) config.rules = [];
 if (!config["proxy-groups"]) config["proxy-groups"] = [];
@@ -29,6 +29,7 @@ group.tolerance = 150;
 // 4. 构建定制分组
 const safeProxies = names => names.filter(name => allowedNames.has(name)).length > 0 ? names.filter(name => allowedNames.has(name)) : ["DIRECT"];
 const targetCustomGoogleGroup = "🤖 谷歌 & Gemini";
+allowedNames.add("媒体");
 // Gemini 只引用地区 url-test 组（排除港/新），每周期约 4 次 gemini.google.com 测速
 const geminiRegionPreferred = ["🇺🇸 美国节点", "🇺🇲 美国节点", "🇯🇵 日本节点", "🇨🇳 台湾节点", "🇰🇷 韩国节点", "美国节点", "日本节点", "台湾节点", "韩国节点"];
 const geminiRegionGroups = geminiRegionPreferred.filter(name => validGroupNames.has(name));
@@ -48,7 +49,7 @@ interval: 3600,
 tolerance: 150,
 proxies: safeProxies(geminiRegionGroups.length > 0 ? geminiRegionGroups : ["DIRECT"])
 },
-{ name: "🏎️ F1 TV", type: "select", proxies: safeProxies(["低倍率节点", "美国节点", "选择代理", "DIRECT"]) }
+{ name: "🏎️ F1 TV", type: "select", proxies: safeProxies(["媒体", "美国节点", "选择代理", "DIRECT"]) }
 );
 // 剔除已停用的 🎲 随机漫游 分组及其引用
 config["proxy-groups"].forEach(g => {
@@ -87,20 +88,25 @@ other.proxies = other.proxies.map(p => p === g.name ? "DIRECT" : p);
 });
 });
 config["proxy-groups"] = config["proxy-groups"].filter(g => !groupsToRemove.some(r => r.name === g.name));
-// 6. ✨ 重建 AI服务 分组：剔除流媒体、选择代理、DIRECT（前置脚本该分组用全量节点池）
+// 6. ✨ 重建 AI服务 分组：剔除流媒体、香港、选择代理、DIRECT（前置脚本该分组用全量节点池）
 const aiServiceExcludedMembers = new Set(["DIRECT", "选择代理", "REJECT", "PASS"]);
+const aiHongKongRe = /(港|HK|Hong Kong|香港)/i;
+const isAiBlockedRef = name => {
+if (!name || aiServiceExcludedMembers.has(name)) return true;
+if (/流媒体/i.test(name)) return true;
+if (aiHongKongRe.test(name)) return true;
+return false;
+};
 const sanitizeAiServiceGroup = () => {
 const aiServiceGroup = config["proxy-groups"].find(g => g.name === "AI服务");
 if (!aiServiceGroup || !Array.isArray(aiServiceGroup.proxies)) return;
-let proxies = aiServiceGroup.proxies.filter(name =>
-allowedNames.has(name) && !/流媒体/i.test(name) && !aiServiceExcludedMembers.has(name)
-);
+let proxies = aiServiceGroup.proxies.filter(name => allowedNames.has(name) && !isAiBlockedRef(name));
 if (proxies.length === 0) {
 const groupNamesNow = new Set(config["proxy-groups"].map(g => g && g.name).filter(Boolean));
-const regionFallback = geminiRegionPreferred.filter(name => groupNamesNow.has(name));
+const regionFallback = geminiRegionPreferred.filter(name => groupNamesNow.has(name) && !isAiBlockedRef(name));
 if (regionFallback.length) proxies = regionFallback;
 else {
-const first = config.proxies ? config.proxies.map(p => p.name).find(n => !/流媒体/i.test(n)) : undefined;
+const first = config.proxies ? config.proxies.map(p => p.name).find(n => !isAiBlockedRef(n)) : undefined;
 if (first) proxies = [first];
 }
 }
@@ -110,10 +116,10 @@ sanitizeAiServiceGroup();
 // 6.5 地区组剔除住宅IP/真·流媒体节点；BGP|CTCU|CMCC 等「高速」专线留在国家组
 const regionGroupRe = /(香港|台湾|新加坡|日本|韩国|美国|英国|德国|马来西亚)节点$/;
 const homeIpRe = /住宅IP|家庭IP|Home\s?IP/i;
-// 仅名称带流媒体解锁语义的进「流媒体专线」，不因「高速」误判（如 日本高速|BGP|CTCU）
+// 真·流媒体从国家组剔除；「媒体」组 = 低倍率 ∪ 流媒体（方案 A 单 url-test）
 const streamingOnlyRe = /流媒体|高速媒体|奈飞|Netflix|\bNF\b/i;
+const lowRateRe = /(0\.[1-5]x)|(流量倍率:0\.[1-5])|(倍率:0\.[1-5])/i;
 const stripFromRegionRe = /住宅IP|家庭IP|Home\s?IP|流媒体|高速媒体|奈飞|Netflix|\bNF\b/i;
-const mediaNodeRe = streamingOnlyRe;
 const oldAppGroupRe = /^(Youtube|YouTube|Twitch|Spotify|TikTok|Netflix|哔哩哔哩|巴哈姆特)$/i;
 const policyRewrite = {
     Youtube: "媒体",
@@ -122,6 +128,8 @@ const policyRewrite = {
     Spotify: "媒体",
     TikTok: "媒体",
     Netflix: "媒体",
+    "流媒体专线": "媒体",
+    "低倍率节点": "媒体",
     "哔哩哔哩": "DIRECT",
     "巴哈姆特": "台湾节点"
 };
@@ -132,14 +140,14 @@ const mapPolicyName = name => {
 };
 const allProxyNames = config.proxies ? config.proxies.map(p => p.name) : [];
 const homeIpNodes = allProxyNames.filter(name => homeIpRe.test(name));
-const mediaNodes = allProxyNames.filter(name => mediaNodeRe.test(name));
+const mediaPoolNodes = [...new Set(allProxyNames.filter(name => lowRateRe.test(name) || streamingOnlyRe.test(name)))];
 config["proxy-groups"].forEach(group => {
     if (!regionGroupRe.test(group.name) || !Array.isArray(group.proxies)) return;
     group.proxies = group.proxies.filter(name => !stripFromRegionRe.test(name));
     if (group.proxies.length === 0) group.proxies = ["DIRECT"];
 });
-["家庭IP", "流媒体专线", "媒体"].forEach(n => allowedNames.add(n));
-config["proxy-groups"] = config["proxy-groups"].filter(g => !["家庭IP", "流媒体专线", "媒体"].includes(g.name));
+["家庭IP", "媒体"].forEach(n => allowedNames.add(n));
+config["proxy-groups"] = config["proxy-groups"].filter(g => !["家庭IP", "流媒体专线", "媒体", "低倍率节点"].includes(g.name));
 config["proxy-groups"].unshift(
     {
         name: "家庭IP",
@@ -150,30 +158,22 @@ config["proxy-groups"].unshift(
         proxies: safeProxies(homeIpNodes)
     },
     {
-        name: "流媒体专线",
+        name: "媒体",
         type: "url-test",
         url: "https://cp.cloudflare.com",
         interval: 14400,
         tolerance: 150,
-        proxies: safeProxies(mediaNodes)
-    },
-    {
-        name: "媒体",
-        type: "select",
-        proxies: safeProxies(["低倍率节点", "流媒体专线"])
+        proxies: safeProxies(mediaPoolNodes)
     }
 );
 const selectProxyGroup = config["proxy-groups"].find(g => g.name === "选择代理");
 if (selectProxyGroup && Array.isArray(selectProxyGroup.proxies)) {
     const insertNames = ["媒体", "家庭IP"].filter(n => !selectProxyGroup.proxies.includes(n));
     if (insertNames.length > 0) {
-        const lowIdx = selectProxyGroup.proxies.indexOf("低倍率节点");
-        if (lowIdx >= 0) selectProxyGroup.proxies.splice(lowIdx + 1, 0, ...insertNames);
-        else {
-            const manualIdx = selectProxyGroup.proxies.indexOf("手动选择");
-            if (manualIdx >= 0) selectProxyGroup.proxies.splice(manualIdx, 0, ...insertNames);
-            else selectProxyGroup.proxies.push(...insertNames);
-        }
+        selectProxyGroup.proxies = selectProxyGroup.proxies.filter(p => p !== "低倍率节点" && p !== "流媒体专线");
+        const manualIdx = selectProxyGroup.proxies.indexOf("手动选择");
+        if (manualIdx >= 0) selectProxyGroup.proxies.splice(manualIdx, 0, ...insertNames);
+        else selectProxyGroup.proxies.push(...insertNames);
     }
 }
 const ruleParamsSet = new Set(["no-resolve", "force-remote-dns", "prefer-ipv6"]);
