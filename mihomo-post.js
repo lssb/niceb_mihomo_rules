@@ -89,7 +89,7 @@ other.proxies = other.proxies.map(p => p === g.name ? "DIRECT" : p);
 });
 config["proxy-groups"] = config["proxy-groups"].filter(g => !groupsToRemove.some(r => r.name === g.name));
 // 6. ✨ 重建 AI服务 分组：剔除流媒体、香港、选择代理、DIRECT（前置脚本该分组用全量节点池）
-const aiServiceExcludedMembers = new Set(["DIRECT", "选择代理", "REJECT", "PASS"]);
+const aiServiceExcludedMembers = new Set(["DIRECT", "选择代理", "REJECT", "PASS", "媒体", "流媒体专线", "低倍率节点"]);
 const aiHongKongRe = /(港|HK|Hong Kong|香港)/i;
 const isAiBlockedRef = name => {
 if (!name || aiServiceExcludedMembers.has(name)) return true;
