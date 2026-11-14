@@ -1,4 +1,4 @@
-// 全局后置脚本：去 Apple/Microsoft/Adobe 规则、保留流量面板、定制分流、抢票特化、Gemini 地区组智选及静态资源修复、家庭IP与媒体(url-test 低倍率∪流媒体)
+// 全局后置脚本：去 Apple/Microsoft/Adobe 规则、保留流量面板、定制分流、抢票特化、Gemini 地区组智选及静态资源修复、家庭IP与媒体(url-test 低倍率∪流媒体∪地区组)
 function main(config) {
 if (!config.rules) config.rules = [];
 if (!config["proxy-groups"]) config["proxy-groups"] = [];
@@ -116,7 +116,7 @@ sanitizeAiServiceGroup();
 // 6.5 地区组剔除住宅IP/真·流媒体节点；BGP|CTCU|CMCC 等「高速」专线留在国家组
 const regionGroupRe = /(香港|台湾|新加坡|日本|韩国|美国|英国|德国|马来西亚)节点$/;
 const homeIpRe = /住宅IP|家庭IP|Home\s?IP/i;
-// 真·流媒体从国家组剔除；「媒体」组 = 低倍率 ∪ 流媒体（方案 A 单 url-test）
+// 真·流媒体从国家组剔除；「媒体」组 = 低倍率 ∪ 流媒体 ∪ 可用地区组
 const streamingOnlyRe = /流媒体|高速媒体|奈飞|Netflix|\bNF\b/i;
 const lowRateRe = /(0\.[1-5]x)|(流量倍率:0\.[1-5])|(倍率:0\.[1-5])/i;
 const stripFromRegionRe = /住宅IP|家庭IP|Home\s?IP|流媒体|高速媒体|奈飞|Netflix|\bNF\b/i;
@@ -146,8 +146,25 @@ config["proxy-groups"].forEach(group => {
     group.proxies = group.proxies.filter(name => !stripFromRegionRe.test(name));
     if (group.proxies.length === 0) group.proxies = ["DIRECT"];
 });
-// 专用节点池为空时不创建分组，避免 safeProxies 的 DIRECT 兜底。
-const customNodePools = { "家庭IP": homeIpNodes, "媒体": mediaPoolNodes };
+// 地区组的所有分支都必须指向实际代理，排除 DIRECT、空组和循环引用。
+const groupsByName = new Map(config["proxy-groups"].map(group => [group.name, group]));
+const proxyOnlyNames = new Set((config.proxies || [])
+    .filter(proxy => !["direct", "reject", "reject-drop", "pass"].includes(String(proxy.type).toLowerCase()))
+    .map(proxy => proxy.name));
+const isProxyOnly = (name, visiting = new Set()) => {
+    if (["DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE"].includes(name)) return false;
+    const group = groupsByName.get(name);
+    if (!group) return proxyOnlyNames.has(name);
+    if (visiting.has(name) || !Array.isArray(group.proxies) || group.proxies.length === 0) return false;
+    const next = new Set(visiting).add(name);
+    return group.proxies.every(member => isProxyOnly(member, next));
+};
+const mediaRegionGroups = ["香港", "台湾", "新加坡", "日本", "美国", "韩国"].flatMap(region =>
+    config["proxy-groups"].filter(group => group.name.endsWith(region + "节点") && isProxyOnly(group.name)).map(group => group.name)
+);
+const mediaMembers = [...new Set([...mediaPoolNodes.filter(name => isProxyOnly(name)), ...mediaRegionGroups])];
+// 没有匹配节点或可用地区组时不创建分组，避免 DIRECT 兜底。
+const customNodePools = { "家庭IP": homeIpNodes.filter(name => isProxyOnly(name)), "媒体": mediaMembers };
 const missingCustomGroups = new Set(Object.keys(customNodePools).filter(name => customNodePools[name].length === 0));
 Object.keys(customNodePools).forEach(name => {
     if (missingCustomGroups.has(name)) allowedNames.delete(name);
