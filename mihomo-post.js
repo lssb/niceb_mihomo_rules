@@ -146,29 +146,27 @@ config["proxy-groups"].forEach(group => {
     group.proxies = group.proxies.filter(name => !stripFromRegionRe.test(name));
     if (group.proxies.length === 0) group.proxies = ["DIRECT"];
 });
-["家庭IP", "媒体"].forEach(n => allowedNames.add(n));
+// 专用节点池为空时不创建分组，避免 safeProxies 的 DIRECT 兜底。
+const customNodePools = { "家庭IP": homeIpNodes, "媒体": mediaPoolNodes };
+const missingCustomGroups = new Set(Object.keys(customNodePools).filter(name => customNodePools[name].length === 0));
+Object.keys(customNodePools).forEach(name => {
+    if (missingCustomGroups.has(name)) allowedNames.delete(name);
+    else allowedNames.add(name);
+});
 config["proxy-groups"] = config["proxy-groups"].filter(g => !["家庭IP", "流媒体专线", "媒体", "低倍率节点"].includes(g.name));
 config["proxy-groups"].unshift(
-    {
-        name: "家庭IP",
+    ...Object.entries(customNodePools).filter(([, nodes]) => nodes.length > 0).map(([name, nodes]) => ({
+        name,
         type: "url-test",
         url: "https://cp.cloudflare.com",
         interval: 14400,
         tolerance: 150,
-        proxies: safeProxies(homeIpNodes)
-    },
-    {
-        name: "媒体",
-        type: "url-test",
-        url: "https://cp.cloudflare.com",
-        interval: 14400,
-        tolerance: 150,
-        proxies: safeProxies(mediaPoolNodes)
-    }
+        proxies: nodes
+    }))
 );
 const selectProxyGroup = config["proxy-groups"].find(g => g.name === "选择代理");
 if (selectProxyGroup && Array.isArray(selectProxyGroup.proxies)) {
-    const insertNames = ["媒体", "家庭IP"].filter(n => !selectProxyGroup.proxies.includes(n));
+    const insertNames = ["媒体", "家庭IP"].filter(n => !missingCustomGroups.has(n) && !selectProxyGroup.proxies.includes(n));
     if (insertNames.length > 0) {
         selectProxyGroup.proxies = selectProxyGroup.proxies.filter(p => p !== "低倍率节点" && p !== "流媒体专线");
         const manualIdx = selectProxyGroup.proxies.indexOf("手动选择");
@@ -187,14 +185,16 @@ config.rules = config.rules.map(rule => {
     const raw = parts[targetIndex].trim();
     if (ruleParamsSet.has(raw)) return rule;
     const next = mapPolicyName(raw);
+    if (missingCustomGroups.has(next)) return null;
     if (next === raw) return rule;
     parts[targetIndex] = next;
     return parts.join(",");
-});
+}).filter(rule => rule !== null);
 config["proxy-groups"].forEach(group => {
     if (!group.proxies || !Array.isArray(group.proxies)) return;
     const seen = new Set();
     group.proxies = group.proxies.map(p => mapPolicyName(p)).filter(p => {
+        if (missingCustomGroups.has(p)) return false;
         if (seen.has(p)) return false;
         seen.add(p);
         return true;
