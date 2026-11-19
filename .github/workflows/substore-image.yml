@@ -1,0 +1,76 @@
+name: Check Sub-Store image
+
+on:
+  schedule:
+    - cron: '23 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: substore-image-update
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Restore last checked digest
+        uses: actions/cache/restore@v4
+        with:
+          path: .image-state
+          key: substore-digest-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: substore-digest-
+
+      - name: Check Docker Hub image
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(curl --fail --silent --show-error --retry 3 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:xream/sub-store:pull' | jq -er .token)
+          digest=$(curl --fail --silent --show-error --retry 3 --head             -H "Authorization: Bearer $token"             -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'             https://registry-1.docker.io/v2/xream/sub-store/manifests/latest             | tr -d '\r' | awk 'tolower($1)=="docker-content-digest:" {print $2}')
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          previous=$(cat .image-state/digest 2>/dev/null || true)
+          changed=false
+          if [[ -n "$previous" && "$previous" != "$digest" ]]; then changed=true; fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          mkdir -p .image-state
+          printf '%s\n' "$digest" > .image-state/digest
+          {
+            echo '### xream/sub-store:latest'
+            echo "Current digest: $digest"
+            echo "Previous digest: ${previous:-first run, recording baseline}"
+            echo "Image changed: $changed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy changed image
+        if: steps.image.outputs.changed == 'true' && vars.SUBSTORE_AUTO_RESTORE_READY == 'true'
+        env:
+          DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$DEPLOY_HOOK" ]]; then
+            echo 'RENDER_DEPLOY_HOOK secret is required.' >&2
+            exit 1
+          fi
+          image_url=$(jq -rn --arg value "docker.io/xream/sub-store@$IMAGE_DIGEST" '$value|@uri')
+          separator='?'
+          if [[ "$DEPLOY_HOOK" == *'?'* ]]; then separator='&'; fi
+          curl --fail --silent --show-error --max-time 60 --output /dev/null             --request POST "${DEPLOY_HOOK}${separator}imgURL=${image_url}"
+          echo 'Render accepted the deployment request. Check Render for deployment status.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Explain manual deployment
+        if: steps.image.outputs.changed == 'true' && vars.SUBSTORE_AUTO_RESTORE_READY != 'true'
+        run: echo 'New image detected. Automatic deployment is disabled until subscription persistence or automatic restoration is configured.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save checked digest
+        if: steps.image.outputs.changed != 'true' || vars.SUBSTORE_AUTO_RESTORE_READY == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .image-state
+          key: substore-digest-${{ github.run_id }}-${{ github.run_attempt }}
